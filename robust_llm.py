@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Sequence
 
@@ -201,11 +201,23 @@ class RobustLLMClient:
         self._rate.acquire()
 
         def do_call() -> ChatResult:
-            completion = client.chat.completions.create(
-                model=model,
-                messages=list(messages),
-                timeout=float(os.getenv("LLM_TIMEOUT_S", "60")),
-            )
+            kwargs: dict[str, Any] = {
+                "model": model,
+                "messages": list(messages),
+                "timeout": float(os.getenv("LLM_TIMEOUT_S", "60")),
+            }
+            # OpenRouter рекомендует заголовки для рейтинга; на APIConnectionError не влияют
+            if provider_label == "openrouter":
+                extra: dict[str, str] = {}
+                ref = os.getenv("OPENROUTER_HTTP_REFERER", "").strip()
+                title = os.getenv("OPENROUTER_TITLE", "").strip()
+                if ref:
+                    extra["HTTP-Referer"] = ref
+                if title:
+                    extra["X-OpenRouter-Title"] = title
+                if extra:
+                    kwargs["extra_headers"] = extra
+            completion = client.chat.completions.create(**kwargs)
             text = (completion.choices[0].message.content or "").strip()
             usage = completion.usage
             pt = int(usage.prompt_tokens or 0) if usage else 0
